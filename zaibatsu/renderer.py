@@ -154,7 +154,13 @@ class CityRenderer:
         kaiju_frame: int = 0,
         kaiju_target_pid: int = 0,
         kaiju_target_x: int = -1,
-        kaiju_target_y: int = -1
+        kaiju_target_y: int = -1,
+        orbital_active: bool = False,
+        orbital_frame: int = 0,
+        orbital_target_x: int = -1,
+        orbital_target_y: int = -1,
+        orbital_target_width: int = 6,
+        dt: float = 0.1
     ) -> Text:
         """Renders the top-down 3D isometric staggered grid cityscape."""
         self.tick_count += 1
@@ -196,7 +202,7 @@ class CityRenderer:
 
         # 3. Draw Clouds (clip at right edge instead of wrapping individual chars)
         cpu = system_stats.get("cpu_percent", 0)
-        cloud_speed = 0.4 + (cpu / 100.0) * 1.2
+        cloud_speed = (0.4 + (cpu / 100.0) * 1.2) * (dt / 0.1)
         for cloud in self.clouds:
             cloud["x"] = (cloud["x"] - cloud_speed) % width
             c_x = int(cloud["x"])
@@ -294,7 +300,7 @@ class CityRenderer:
         # 6. Painter's Algorithm (Draw Back to Front: Row 0 -> Road 0 -> Row 1 -> Road 1 -> Row 2 -> Road 2)
         for r_idx in range(rows):
             # A. Draw the street behind/below this row first
-            self._render_lane_traffic(canvas, width, road_y_coords[r_idx], r_idx, system_stats)
+            self._render_lane_traffic(canvas, width, road_y_coords[r_idx], r_idx, system_stats, dt)
             
             # B. Draw all buildings in this row
             for c_idx in range(cols):
@@ -314,9 +320,9 @@ class CityRenderer:
                     demo = self.demolitions[proc["pid"]]
                     demo.col_start = col_start
                     demo.ground_y = ground_y
-                    if demo.frame < demo.max_frames:
-                        self._draw_demolition_3d(canvas, demo)
-                        demo.frame += 1
+                    if int(demo.frame) < demo.max_frames:
+                        self._draw_demolition_3d(canvas, demo, dt)
+                        demo.frame += dt / 0.1
                     else:
                         del self.demolitions[proc["pid"]]
                     continue
@@ -351,7 +357,10 @@ class CityRenderer:
                     # Smooth height lerping — buildings grow/shrink organically instead of snapping
                     pid = proc["pid"]
                     prev_h = self._height_lerp.get(pid, float(target_h))
-                    smooth_h = prev_h + (target_h - prev_h) * 0.3
+                    decay_rate = 3.5667
+                    lerp_factor = 1.0 - math.exp(-decay_rate * dt)
+                    lerp_factor = max(0.01, min(1.0, lerp_factor))
+                    smooth_h = prev_h + (target_h - prev_h) * lerp_factor
                     self._height_lerp[pid] = smooth_h
                     b_height = max(4, int(smooth_h))
 
@@ -360,6 +369,28 @@ class CityRenderer:
 
                     # Draw the Volumetric 3D Building
                     self._draw_building_3d(canvas, col_start, ground_y, b_height, b_width, b_depth, proc, is_selected, district)
+                    
+                    cursor_w = b_width
+                    cursor_h = b_height
+                    cursor_d = b_depth
+                else:
+                    if is_selected:
+                        self._draw_vacant_plot_3d(
+                            canvas, col_start, ground_y, plot_w, plot_d,
+                            self.theme["selected_border"], self.theme["selected_fill"]
+                        )
+                    cursor_w = plot_w
+                    cursor_h = 0
+                    cursor_d = plot_d
+
+                # Draw selection cursor/pointer chevron
+                if is_selected:
+                    arrow_x = col_start + (cursor_w + cursor_d - 3) // 2
+                    bounce = int((math.sin(self.tick_count * 0.5) + 1.0) * 0.8) # 0 to 1
+                    arrow_y = ground_y - cursor_h - cursor_d - bounce
+                    
+                    if 0 <= arrow_y < height and 0 <= arrow_x < width:
+                        canvas[arrow_y][arrow_x] = ("▼", self.theme["selected_border"])
 
         # 7. Render Interactive Mini-Games Overlays (Helicopter Searchlights & Godzilla Laser Strikes)
         
@@ -376,6 +407,17 @@ class CityRenderer:
         stale_pids = [pid for pid in self._height_lerp if pid not in active_pids]
         for pid in stale_pids:
             del self._height_lerp[pid]
+
+        # Pass orbital control arguments down into render_city payload definition
+        if orbital_active:
+            self._render_orbital_strike(
+                canvas, width, height, orbital_frame, 
+                orbital_target_x, orbital_target_y, orbital_target_width
+            )
+
+        # Force the shockwave layer to process last, overriding existing cells completely
+        if orbital_active and orbital_frame == 6:
+            self._apply_impact_shockwave(canvas, width, height)
 
         # Convert canvas to Text (span-coalesced for performance)
         # Consecutive cells with the same style are merged into a single append() call
@@ -399,6 +441,65 @@ class CityRenderer:
             result_text.append("\n")
 
         return result_text
+
+    def _draw_vacant_plot_3d(
+        self, 
+        canvas: List[List[Tuple[str, str]]], 
+        X: int, 
+        Y: int, 
+        W: int, 
+        D: int, 
+        border_color: str,
+        fill_color: str
+    ):
+        """Draws a flat isometric plot blueprint on the ground to show a vacant slot."""
+        back_y = Y - D + 1
+        back_x_start = X + D - 1
+
+        # Draw interior of the parallelogram
+        for d in range(0, D):
+            r = Y - d
+            if 0 <= r < len(canvas):
+                for c in range(X + d, X + W - 1 + d):
+                    if 0 <= c < len(canvas[0]):
+                        is_edge = (
+                            (r == Y and (X <= c <= X + W - 2)) or
+                            (r == back_y and (back_x_start <= c <= back_x_start + W - 2)) or
+                            (c == X + d) or
+                            (c == X + W - 2 + d)
+                        )
+                        if not is_edge:
+                            canvas[r][c] = (".", fill_color)
+
+        # Draw the front edge
+        for c in range(X, X + W - 1):
+            if 0 <= Y < len(canvas) and 0 <= c < len(canvas[0]):
+                is_left = (c == X)
+                is_right = (c == X + W - 2)
+                char = "╚" if is_left else ("╝" if is_right else "═")
+                canvas[Y][c] = (char, border_color)
+        
+        # Draw the back edge
+        for c in range(back_x_start, back_x_start + W - 1):
+            if 0 <= back_y < len(canvas) and 0 <= c < len(canvas[0]):
+                is_left = (c == back_x_start)
+                is_right = (c == back_x_start + W - 2)
+                char = "╔" if is_left else ("╗" if is_right else "═")
+                canvas[back_y][c] = (char, border_color)
+        
+        # Draw the sloped left and right edges
+        for d in range(1, D - 1):
+            # Left edge sloped
+            ly = Y - d
+            lx = X + d
+            if 0 <= ly < len(canvas) and 0 <= lx < len(canvas[0]):
+                canvas[ly][lx] = ("/", border_color)
+            
+            # Right edge sloped
+            ry = Y - d
+            rx = X + W - 2 + d
+            if 0 <= ry < len(canvas) and 0 <= rx < len(canvas[0]):
+                canvas[ry][rx] = ("/", border_color)
 
     def _draw_building_3d(
         self, 
@@ -595,7 +696,7 @@ class CityRenderer:
             if 0 <= smoke_r < len(canvas):
                 canvas[smoke_r][center_c + D - 1] = (smoke_char, "dim white" if district != "industrial" else "dim orange")
 
-    def _render_lane_traffic(self, canvas: List[List[Tuple[str, str]]], width: int, Y: int, lane_idx: int, system_stats: Dict[str, Any]):
+    def _render_lane_traffic(self, canvas: List[List[Tuple[str, str]]], width: int, Y: int, lane_idx: int, system_stats: Dict[str, Any], dt: float = 0.1):
         """Draws the horizontal road line and car traffic for a specific lane."""
         if Y >= len(canvas):
             return
@@ -634,7 +735,7 @@ class CityRenderer:
 
         active_cars = []
         for car in lane_cars:
-            car["x"] += car["dir"] * car_speed
+            car["x"] += car["dir"] * car_speed * (dt / 0.1)
             cx = int(car["x"])
             
             if 0 <= cx < width - len(car["shape"]):
@@ -645,7 +746,7 @@ class CityRenderer:
                     
         self.cars[lane_idx] = active_cars
 
-    def _draw_demolition_3d(self, canvas: List[List[Tuple[str, str]]], demo: DemolitionState):
+    def _draw_demolition_3d(self, canvas: List[List[Tuple[str, str]]], demo: DemolitionState, dt: float = 0.1):
         """Draws a collapsing 3D building explosion animation."""
         f = demo.frame
         X = demo.col_start
@@ -702,16 +803,18 @@ class CityRenderer:
         else:
             updated_particles = []
             for pr, pc, pchar, pstyle in demo.particles:
-                new_r = pr + random.choice([0, 1, 2])
-                new_c = pc + random.choice([-1, 0, 1])
+                new_r = pr + random.choice([0, 1, 2]) * (dt / 0.1)
+                new_c = pc + random.choice([-1, 0, 1]) * (dt / 0.1)
                 if new_r <= Y + D:
                     updated_particles.append((new_r, new_c, pchar, pstyle))
             demo.particles = updated_particles
 
         # Print particles
         for pr, pc, pchar, pstyle in demo.particles:
-            if 0 <= pr < len(canvas) and 0 <= pc < len(canvas[0]):
-                canvas[pr][pc] = (pchar, pstyle)
+            ipr = int(pr)
+            ipc = int(pc)
+            if 0 <= ipr < len(canvas) and 0 <= ipc < len(canvas[0]):
+                canvas[ipr][ipc] = (pchar, pstyle)
 
         # Rubble pile at base
         rubble_h = int(H * 0.15) + 1
@@ -762,6 +865,71 @@ class CityRenderer:
                 c = hx + j
                 if 0 <= c < width and char != " ":
                     canvas[r][c] = (char, "bold bright_cyan")
+
+    def _render_orbital_strike(
+        self, 
+        canvas: List[List[Tuple[str, str]]], 
+        width: int, 
+        height: int, 
+        frame: int, 
+        target_x: int, 
+        target_y: int, 
+        b_width: int
+    ):
+        """Renders the satellite targeting reticle and kinetic column delivery beam."""
+        center_x = target_x + (b_width // 2)
+        
+        # 1. Reticle Convergence Path (Frames 1-4)
+        if frame <= 4:
+            reticle_style = "bold bright_red" if (self.tick_count % 2 == 0) else "bold red"
+            radius = max(2, 8 - (frame * 2))
+            
+            # Draw linear alignment guides
+            for r in range(max(0, target_y - 8), min(height, target_y + 4)):
+                if 0 <= center_x < width:
+                    canvas[r][center_x] = ("┃", reticle_style)
+            for c in range(max(0, center_x - radius * 2), min(width, center_x + radius * 2 + 1)):
+                if 0 <= target_y < height:
+                    canvas[target_y][c] = ("━", reticle_style)
+            
+            # Draw bounding corner brackets
+            brackets = [
+                (target_y - radius, center_x - radius * 2, "▛"),
+                (target_y - radius, center_x + radius * 2, "▜"),
+                (target_y + radius, center_x - radius * 2, "▙"),
+                (target_y + radius, center_x + radius * 2, "▟")
+            ]
+            for br, bc, glyph in brackets:
+                if 0 <= br < height and 0 <= bc < width:
+                    canvas[br][bc] = (glyph, reticle_style)
+
+        # 2. High-Energy Column Delivery Path (Frames 5-9)
+        elif 5 <= frame <= 9:
+            beam_chars = ["█", "▓", "▒", "░"] if frame > 6 else ["█"]
+            style = (
+                "bold bright_white on rgb(255,255,255)" if frame == 6 else (
+                    "bold bright_cyan on rgb(0,80,160)" if frame == 5 else "dim cyan"
+                )
+            )
+            
+            # Blast column width narrows as energy dissipates post-impact
+            beam_spread = 2 if frame <= 6 else 1
+            
+            for r in range(0, target_y + 1):
+                if r >= height:
+                    continue
+                for c in range(max(0, center_x - beam_spread), min(width, center_x + beam_spread + 1)):
+                    canvas[r][c] = (random.choice(beam_chars), style)
+
+    def _apply_impact_shockwave(self, canvas: List[List[Tuple[str, str]]], width: int, height: int):
+        """Intercepts the entire canvas buffer post-render and forces style/color inversion."""
+        for r in range(height):
+            for c in range(width):
+                char, style = canvas[r][c]
+                if char == " ":
+                    canvas[r][c] = ("▒", "bold bright_white on rgb(220,220,220)")
+                else:
+                    canvas[r][c] = (char, "bold black on bright_white")
 
     def _render_kaiju(self, canvas: List[List[Tuple[str, str]]], width: int, height: int, frame: int, target_pid: int, target_x: int = -1, target_y: int = -1):
         """Renders the walking Godzilla-style Kaiju dinosaur and its laser strikes."""
@@ -1099,7 +1267,8 @@ class CityRenderer:
         selected_proc: Optional[Dict[str, Any]], 
         sort_by: str, 
         search_query: str,
-        is_paused: bool
+        is_paused: bool,
+        is_demo: bool = False
     ) -> Panel:
         """Generates the right/sidebar status dashboard details with system stats."""
         dash = Text()
@@ -1107,6 +1276,9 @@ class CityRenderer:
         # Theme Title
         dash.append(" 🌆 ZAIBATSU CITY MONITOR \n", style=self.theme["dashboard_title"])
         dash.append("=" * 26 + "\n", style=self.theme["dashboard_border"])
+        if is_demo:
+            dash.append(" ⚠️ DEMO MODE ACTIVE (SAFE) ⚠️\n", style="bold yellow")
+            dash.append("=" * 26 + "\n", style=self.theme["dashboard_border"])
         
         # System Stats
         cpu = system_stats.get("cpu_percent", 0)
@@ -1202,6 +1374,7 @@ class CityRenderer:
         dash.append("  [C] / [M]       : Sort by CPU / RAM\n", style="dim white")
         dash.append("  [F] / [Space]   : Filter / Pause TUI\n", style="dim white")
         dash.append("  [K] / [Delete]  : Kaiju Strike Demolition\n", style="bold bright_red")
+        dash.append("  [O]             : Orbital Strike Demolition\n", style="bold bright_yellow")
         dash.append("  [Q] / [Esc]     : Shutdown Monitor\n", style="dim white")
 
         return Panel(
