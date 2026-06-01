@@ -369,6 +369,28 @@ class CityRenderer:
 
                     # Draw the Volumetric 3D Building
                     self._draw_building_3d(canvas, col_start, ground_y, b_height, b_width, b_depth, proc, is_selected, district)
+                    
+                    cursor_w = b_width
+                    cursor_h = b_height
+                    cursor_d = b_depth
+                else:
+                    if is_selected:
+                        self._draw_vacant_plot_3d(
+                            canvas, col_start, ground_y, plot_w, plot_d,
+                            self.theme["selected_border"], self.theme["selected_fill"]
+                        )
+                    cursor_w = plot_w
+                    cursor_h = 0
+                    cursor_d = plot_d
+
+                # Draw selection cursor/pointer chevron
+                if is_selected:
+                    arrow_x = col_start + (cursor_w + cursor_d - 3) // 2
+                    bounce = int((math.sin(self.tick_count * 0.5) + 1.0) * 0.8) # 0 to 1
+                    arrow_y = ground_y - cursor_h - cursor_d - bounce
+                    
+                    if 0 <= arrow_y < height and 0 <= arrow_x < width:
+                        canvas[arrow_y][arrow_x] = ("▼", self.theme["selected_border"])
 
         # 7. Render Interactive Mini-Games Overlays (Helicopter Searchlights & Godzilla Laser Strikes)
         
@@ -419,6 +441,65 @@ class CityRenderer:
             result_text.append("\n")
 
         return result_text
+
+    def _draw_vacant_plot_3d(
+        self, 
+        canvas: List[List[Tuple[str, str]]], 
+        X: int, 
+        Y: int, 
+        W: int, 
+        D: int, 
+        border_color: str,
+        fill_color: str
+    ):
+        """Draws a flat isometric plot blueprint on the ground to show a vacant slot."""
+        back_y = Y - D + 1
+        back_x_start = X + D - 1
+
+        # Draw interior of the parallelogram
+        for d in range(0, D):
+            r = Y - d
+            if 0 <= r < len(canvas):
+                for c in range(X + d, X + W - 1 + d):
+                    if 0 <= c < len(canvas[0]):
+                        is_edge = (
+                            (r == Y and (X <= c <= X + W - 2)) or
+                            (r == back_y and (back_x_start <= c <= back_x_start + W - 2)) or
+                            (c == X + d) or
+                            (c == X + W - 2 + d)
+                        )
+                        if not is_edge:
+                            canvas[r][c] = (".", fill_color)
+
+        # Draw the front edge
+        for c in range(X, X + W - 1):
+            if 0 <= Y < len(canvas) and 0 <= c < len(canvas[0]):
+                is_left = (c == X)
+                is_right = (c == X + W - 2)
+                char = "╚" if is_left else ("╝" if is_right else "═")
+                canvas[Y][c] = (char, border_color)
+        
+        # Draw the back edge
+        for c in range(back_x_start, back_x_start + W - 1):
+            if 0 <= back_y < len(canvas) and 0 <= c < len(canvas[0]):
+                is_left = (c == back_x_start)
+                is_right = (c == back_x_start + W - 2)
+                char = "╔" if is_left else ("╗" if is_right else "═")
+                canvas[back_y][c] = (char, border_color)
+        
+        # Draw the sloped left and right edges
+        for d in range(1, D - 1):
+            # Left edge sloped
+            ly = Y - d
+            lx = X + d
+            if 0 <= ly < len(canvas) and 0 <= lx < len(canvas[0]):
+                canvas[ly][lx] = ("/", border_color)
+            
+            # Right edge sloped
+            ry = Y - d
+            rx = X + W - 2 + d
+            if 0 <= ry < len(canvas) and 0 <= rx < len(canvas[0]):
+                canvas[ry][rx] = ("/", border_color)
 
     def _draw_building_3d(
         self, 
