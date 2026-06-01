@@ -231,7 +231,7 @@ class ZaibatsuApp:
                         prev_ticks = int(self.kaiju_laser_ticks)
                         self.kaiju_laser_ticks += dt / 0.1
                         curr_ticks = int(self.kaiju_laser_ticks)
-                        if curr_ticks == 5 and prev_ticks < 5:
+                        if prev_ticks < 5 <= curr_ticks:
                             # Trigger collapse and termination
                             self.renderer.start_demolition(target_proc, (target_x, target_y, target_height, target_width, target_depth))
                             self.monitor.terminate_process(self.kaiju_target_pid)
