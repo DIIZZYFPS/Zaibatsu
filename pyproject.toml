@@ -4,16 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zaibatsu"
-version = "1.0.0"
+version = "0.1.1"
 description = "A cyberpunk-themed terminal 3D cityscape process monitor"
 readme = "README.md"
 authors = [
     { name = "Zaibatsu Developers" }
 ]
-license = { file = "LICENSE" }
+license = "MIT"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Environment :: Console",
     "Topic :: System :: Monitoring",
@@ -25,7 +24,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/user/zaibatsu"
+Homepage = "https://github.com/DIIZZYFPS/Zaibatsu"
 
 [project.scripts]
 zaibatsu = "zaibatsu.cli:main"

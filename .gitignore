@@ -3,3 +3,8 @@ linenv/
 
 zaibatsu/__pycache__
 __pycache__
+
+# Packaging build artifacts
+dist/
+build/
+*.egg-info/
