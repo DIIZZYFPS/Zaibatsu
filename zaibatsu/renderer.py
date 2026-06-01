@@ -159,7 +159,8 @@ class CityRenderer:
         orbital_frame: int = 0,
         orbital_target_x: int = -1,
         orbital_target_y: int = -1,
-        orbital_target_width: int = 6
+        orbital_target_width: int = 6,
+        dt: float = 0.1
     ) -> Text:
         """Renders the top-down 3D isometric staggered grid cityscape."""
         self.tick_count += 1
@@ -201,7 +202,7 @@ class CityRenderer:
 
         # 3. Draw Clouds (clip at right edge instead of wrapping individual chars)
         cpu = system_stats.get("cpu_percent", 0)
-        cloud_speed = 0.4 + (cpu / 100.0) * 1.2
+        cloud_speed = (0.4 + (cpu / 100.0) * 1.2) * (dt / 0.1)
         for cloud in self.clouds:
             cloud["x"] = (cloud["x"] - cloud_speed) % width
             c_x = int(cloud["x"])
@@ -299,7 +300,7 @@ class CityRenderer:
         # 6. Painter's Algorithm (Draw Back to Front: Row 0 -> Road 0 -> Row 1 -> Road 1 -> Row 2 -> Road 2)
         for r_idx in range(rows):
             # A. Draw the street behind/below this row first
-            self._render_lane_traffic(canvas, width, road_y_coords[r_idx], r_idx, system_stats)
+            self._render_lane_traffic(canvas, width, road_y_coords[r_idx], r_idx, system_stats, dt)
             
             # B. Draw all buildings in this row
             for c_idx in range(cols):
@@ -319,9 +320,9 @@ class CityRenderer:
                     demo = self.demolitions[proc["pid"]]
                     demo.col_start = col_start
                     demo.ground_y = ground_y
-                    if demo.frame < demo.max_frames:
-                        self._draw_demolition_3d(canvas, demo)
-                        demo.frame += 1
+                    if int(demo.frame) < demo.max_frames:
+                        self._draw_demolition_3d(canvas, demo, dt)
+                        demo.frame += dt / 0.1
                     else:
                         del self.demolitions[proc["pid"]]
                     continue
@@ -356,7 +357,10 @@ class CityRenderer:
                     # Smooth height lerping — buildings grow/shrink organically instead of snapping
                     pid = proc["pid"]
                     prev_h = self._height_lerp.get(pid, float(target_h))
-                    smooth_h = prev_h + (target_h - prev_h) * 0.3
+                    decay_rate = 3.5667
+                    lerp_factor = 1.0 - math.exp(-decay_rate * dt)
+                    lerp_factor = max(0.01, min(1.0, lerp_factor))
+                    smooth_h = prev_h + (target_h - prev_h) * lerp_factor
                     self._height_lerp[pid] = smooth_h
                     b_height = max(4, int(smooth_h))
 
@@ -611,7 +615,7 @@ class CityRenderer:
             if 0 <= smoke_r < len(canvas):
                 canvas[smoke_r][center_c + D - 1] = (smoke_char, "dim white" if district != "industrial" else "dim orange")
 
-    def _render_lane_traffic(self, canvas: List[List[Tuple[str, str]]], width: int, Y: int, lane_idx: int, system_stats: Dict[str, Any]):
+    def _render_lane_traffic(self, canvas: List[List[Tuple[str, str]]], width: int, Y: int, lane_idx: int, system_stats: Dict[str, Any], dt: float = 0.1):
         """Draws the horizontal road line and car traffic for a specific lane."""
         if Y >= len(canvas):
             return
@@ -650,7 +654,7 @@ class CityRenderer:
 
         active_cars = []
         for car in lane_cars:
-            car["x"] += car["dir"] * car_speed
+            car["x"] += car["dir"] * car_speed * (dt / 0.1)
             cx = int(car["x"])
             
             if 0 <= cx < width - len(car["shape"]):
@@ -661,7 +665,7 @@ class CityRenderer:
                     
         self.cars[lane_idx] = active_cars
 
-    def _draw_demolition_3d(self, canvas: List[List[Tuple[str, str]]], demo: DemolitionState):
+    def _draw_demolition_3d(self, canvas: List[List[Tuple[str, str]]], demo: DemolitionState, dt: float = 0.1):
         """Draws a collapsing 3D building explosion animation."""
         f = demo.frame
         X = demo.col_start
@@ -718,16 +722,18 @@ class CityRenderer:
         else:
             updated_particles = []
             for pr, pc, pchar, pstyle in demo.particles:
-                new_r = pr + random.choice([0, 1, 2])
-                new_c = pc + random.choice([-1, 0, 1])
+                new_r = pr + random.choice([0, 1, 2]) * (dt / 0.1)
+                new_c = pc + random.choice([-1, 0, 1]) * (dt / 0.1)
                 if new_r <= Y + D:
                     updated_particles.append((new_r, new_c, pchar, pstyle))
             demo.particles = updated_particles
 
         # Print particles
         for pr, pc, pchar, pstyle in demo.particles:
-            if 0 <= pr < len(canvas) and 0 <= pc < len(canvas[0]):
-                canvas[pr][pc] = (pchar, pstyle)
+            ipr = int(pr)
+            ipc = int(pc)
+            if 0 <= ipr < len(canvas) and 0 <= ipc < len(canvas[0]):
+                canvas[ipr][ipc] = (pchar, pstyle)
 
         # Rubble pile at base
         rubble_h = int(H * 0.15) + 1

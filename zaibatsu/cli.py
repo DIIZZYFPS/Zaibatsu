@@ -45,9 +45,9 @@ class ZaibatsuApp:
 
         # Kaiju states
         self.kaiju_active = False
-        self.kaiju_frame = 0
+        self.kaiju_frame = 0.0
         self.kaiju_target_pid = 0
-        self.kaiju_laser_ticks = 0
+        self.kaiju_laser_ticks = 0.0
         self.kaiju_target_x = 0
         self.kaiju_target_y = 0
         self.kaiju_target_height = 0
@@ -78,10 +78,11 @@ class ZaibatsuApp:
         }
         self.cached_procs: List[Dict[str, Any]] = []
         self.last_stats_update = 0.0
+        self.last_draw_time = 0.0
 
         # Orbital kinetic strike states
         self.orbital_active: bool = False
-        self.orbital_frame: int = 0
+        self.orbital_frame: float = 0.0
         self.orbital_target_pid: int = 0
         self.orbital_target_x: int = -1
         self.orbital_target_y: int = -1
@@ -164,10 +165,17 @@ class ZaibatsuApp:
         # Initialize Double-Buffer TUI Diff Engine
         self.diff_engine = TUIRleDiffEngine(self.console)
         self.diff_engine.reset()
+        self.last_draw_time = time.time()
 
         # Active rendering loop
         try:
             while self.running:
+                # Calculate dt for frame-rate independent animations
+                current_time = time.time()
+                dt = current_time - self.last_draw_time
+                self.last_draw_time = current_time
+                dt = max(0.001, dt)
+
                 # 1. Process User Inputs
                 self._handle_inputs()
                 
@@ -200,7 +208,7 @@ class ZaibatsuApp:
 
                 # Kaiju State update
                 if self.kaiju_active:
-                    self.kaiju_frame += 1
+                    self.kaiju_frame += dt / 0.1
                     
                     target_x = self.kaiju_target_x
                     target_y = self.kaiju_target_y
@@ -217,25 +225,29 @@ class ZaibatsuApp:
                         target_proc = {"pid": self.kaiju_target_pid, "name": "Process"}
 
                     stop_x = max(1, target_x - 8)
-                    kx = min(stop_x, self.kaiju_frame * 6)
+                    kx = min(stop_x, int(self.kaiju_frame) * 6)
                     
                     if kx == stop_x:
-                        self.kaiju_laser_ticks += 1
-                        if self.kaiju_laser_ticks == 5:
+                        prev_ticks = int(self.kaiju_laser_ticks)
+                        self.kaiju_laser_ticks += dt / 0.1
+                        curr_ticks = int(self.kaiju_laser_ticks)
+                        if curr_ticks == 5 and prev_ticks < 5:
                             # Trigger collapse and termination
                             self.renderer.start_demolition(target_proc, (target_x, target_y, target_height, target_width, target_depth))
                             self.monitor.terminate_process(self.kaiju_target_pid)
-                        elif self.kaiju_laser_ticks > 5 + 6: # stand for collapse duration (6 frames)
+                        elif curr_ticks > 5 + 6: # stand for collapse duration (6 frames)
                             # Deactivate Kaiju
                             self.kaiju_active = False
-                            self.kaiju_frame = 0
-                            self.kaiju_laser_ticks = 0
+                            self.kaiju_frame = 0.0
+                            self.kaiju_laser_ticks = 0.0
 
                 # Orbital State update
                 if self.orbital_active:
-                    self.orbital_frame += 1
+                    prev_orbital_frame = int(self.orbital_frame)
+                    self.orbital_frame += dt / 0.1
+                    curr_orbital_frame = int(self.orbital_frame)
                     
-                    if self.orbital_frame == 6:
+                    if curr_orbital_frame == 6 and prev_orbital_frame < 6:
                         target_proc = None
                         for p in self.cached_procs:
                             if p["pid"] == self.orbital_target_pid:
@@ -253,9 +265,9 @@ class ZaibatsuApp:
                         # Non-blocking kill hand-off execution
                         self.monitor.terminate_process(self.orbital_target_pid)
                         
-                    elif self.orbital_frame > 9:
+                    elif curr_orbital_frame > 9:
                         self.orbital_active = False
-                        self.orbital_frame = 0
+                        self.orbital_frame = 0.0
 
                 # 3. Handle Demolitions and Selection boundaries
                 cols_count = self.renderer.cols
@@ -286,15 +298,16 @@ class ZaibatsuApp:
                     patrol_mode=self.patrol_mode,
                     heli_coords=(self.heli_x, self.heli_y),
                     kaiju_active=self.kaiju_active,
-                    kaiju_frame=self.kaiju_frame,
+                    kaiju_frame=int(self.kaiju_frame),
                     kaiju_target_pid=self.kaiju_target_pid,
                     kaiju_target_x=self.kaiju_target_x,
                     kaiju_target_y=self.kaiju_target_y,
                     orbital_active=self.orbital_active,
-                    orbital_frame=self.orbital_frame,
+                    orbital_frame=int(self.orbital_frame),
                     orbital_target_x=self.orbital_target_x,
                     orbital_target_y=self.orbital_target_y,
-                    orbital_target_width=self.orbital_target_width
+                    orbital_target_width=self.orbital_target_width,
+                    dt=dt
                 )
                 
                 # Check if dynamic grid size changed and update monitor limit
@@ -323,8 +336,8 @@ class ZaibatsuApp:
                 # Draw layout using RLE Diff Engine
                 self.diff_engine.draw(layout)
 
-                # We run at 10 FPS (100ms ticks) for smooth scrolling animations
-                time.sleep(0.1)
+                # We run at 20 FPS (50ms ticks) for smooth scrolling animations
+                time.sleep(0.05)
 
         except KeyboardInterrupt:
             pass
