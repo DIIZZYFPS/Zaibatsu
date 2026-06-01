@@ -10,7 +10,6 @@ from typing import List, Dict, Any, Optional
 
 from rich.console import Console
 from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
@@ -18,9 +17,10 @@ from zaibatsu.config import THEMES, DEFAULT_THEME, DEFAULT_UPDATE_INTERVAL, MAX_
 from zaibatsu.monitor import SystemMonitor
 from zaibatsu.renderer import CityRenderer
 from zaibatsu.input import KeyboardInput
+from zaibatsu.diff_engine import TUIRleDiffEngine
 
 class ZaibatsuApp:
-    def __init__(self, theme: str = DEFAULT_THEME, interval: float = DEFAULT_UPDATE_INTERVAL):
+    def __init__(self, theme: str = DEFAULT_THEME, interval: float = DEFAULT_UPDATE_INTERVAL, demo: bool = False):
         self.console = Console()
         self.monitor = SystemMonitor()
         self.renderer = CityRenderer(theme_name=theme)
@@ -32,6 +32,7 @@ class ZaibatsuApp:
         self.search_query = ""
         self.is_paused = False
         self.running = False
+        self.demo = demo
         
         # Filtering state
         self.filter_mode = False
@@ -78,6 +79,16 @@ class ZaibatsuApp:
         self.cached_procs: List[Dict[str, Any]] = []
         self.last_stats_update = 0.0
 
+        # Orbital kinetic strike states
+        self.orbital_active: bool = False
+        self.orbital_frame: int = 0
+        self.orbital_target_pid: int = 0
+        self.orbital_target_x: int = -1
+        self.orbital_target_y: int = -1
+        self.orbital_target_height: int = 0
+        self.orbital_target_width: int = 6
+        self.orbital_target_depth: int = 3
+
     def _update_selected_proc_details(self, selected_proc: Optional[Dict[str, Any]]):
         """Fetch detailed stats only for the currently active/selected process."""
         if not selected_proc:
@@ -114,7 +125,8 @@ class ZaibatsuApp:
             limit=MAX_BUILDINGS, 
             sort_by=self.sort_by, 
             search_query=self.search_query, 
-            interval=self.interval
+            interval=self.interval,
+            demo=self.demo
         )
         
         # Initialize UI layout — main content above, ticker strip below
@@ -149,139 +161,177 @@ class ZaibatsuApp:
         selected = active_procs[idx] if idx < len(active_procs) else None
         self._update_selected_proc_details(selected)
 
+        # Initialize Double-Buffer TUI Diff Engine
+        self.diff_engine = TUIRleDiffEngine(self.console)
+        self.diff_engine.reset()
+
         # Active rendering loop
         try:
-            with Live(layout, console=self.console, screen=True, refresh_per_second=10) as live:
-                while self.running:
-                    # 1. Process User Inputs
-                    self._handle_inputs()
+            while self.running:
+                # 1. Process User Inputs
+                self._handle_inputs()
+                
+                # 2. Update stats and process list from the background thread's cache if new metrics are ready
+                monitor_last_update = self.monitor.last_update_time
+                if not self.is_paused and (monitor_last_update > self.last_stats_update):
+                    self.cached_stats = self.monitor.get_system_stats()
+                    self.cached_procs = self.monitor.get_top_processes()
+                    self.last_stats_update = monitor_last_update
                     
-                    # 2. Update stats and process list from the background thread's cache if new metrics are ready
-                    monitor_last_update = self.monitor.last_update_time
-                    if not self.is_paused and (monitor_last_update > self.last_stats_update):
-                        self.cached_stats = self.monitor.get_system_stats()
-                        self.cached_procs = self.monitor.get_top_processes()
-                        self.last_stats_update = monitor_last_update
-                        
-                        self._update_grid_slots()
-                        
-                        # Detect process lifecycle events for the scrolling ticker
-                        self._detect_process_events()
-                        
-                        # Refresh details for selected process after stats reload
-                        active_procs = self._get_active_processes()
-                        idx = self.renderer.selected_row * self.renderer.cols + self.renderer.selected_col
-                        selected = active_procs[idx] if idx < len(active_procs) else None
-                        self._update_selected_proc_details(selected)
+                    self._update_grid_slots()
+                    
+                    # Detect process lifecycle events for the scrolling ticker
+                    self._detect_process_events()
+                    
+                    # Refresh details for selected process after stats reload
+                    active_procs = self._get_active_processes()
+                    idx = self.renderer.selected_row * self.renderer.cols + self.renderer.selected_col
+                    selected = active_procs[idx] if idx < len(active_procs) else None
+                    self._update_selected_proc_details(selected)
 
-                    # Only re-sync grid slots on resize (rows/cols changed)
-                    new_limit = self.renderer.rows * self.renderer.cols
-                    if new_limit != len(self.grid_slots):
-                        self._update_grid_slots()
+                # Only re-sync grid slots on resize (rows/cols changed)
+                new_limit = self.renderer.rows * self.renderer.cols
+                if new_limit != len(self.grid_slots):
+                    self._update_grid_slots()
 
-                    # Update helicopter selection if active
-                    if self.patrol_mode:
-                        self._update_helicopter_selection()
+                # Update helicopter selection if active
+                if self.patrol_mode:
+                    self._update_helicopter_selection()
 
-                    # Kaiju State update
-                    if self.kaiju_active:
-                        self.kaiju_frame += 1
-                        
-                        target_x = self.kaiju_target_x
-                        target_y = self.kaiju_target_y
-                        target_height = self.kaiju_target_height
-                        target_width = self.kaiju_target_width
-                        target_depth = self.kaiju_target_depth
-                        
+                # Kaiju State update
+                if self.kaiju_active:
+                    self.kaiju_frame += 1
+                    
+                    target_x = self.kaiju_target_x
+                    target_y = self.kaiju_target_y
+                    target_height = self.kaiju_target_height
+                    target_width = self.kaiju_target_width
+                    target_depth = self.kaiju_target_depth
+                    
+                    target_proc = None
+                    for p in self.cached_procs:
+                        if p["pid"] == self.kaiju_target_pid:
+                            target_proc = p
+                            break
+                    if not target_proc:
+                        target_proc = {"pid": self.kaiju_target_pid, "name": "Process"}
+
+                    stop_x = max(1, target_x - 8)
+                    kx = min(stop_x, self.kaiju_frame * 6)
+                    
+                    if kx == stop_x:
+                        self.kaiju_laser_ticks += 1
+                        if self.kaiju_laser_ticks == 5:
+                            # Trigger collapse and termination
+                            self.renderer.start_demolition(target_proc, (target_x, target_y, target_height, target_width, target_depth))
+                            self.monitor.terminate_process(self.kaiju_target_pid)
+                        elif self.kaiju_laser_ticks > 5 + 6: # stand for collapse duration (6 frames)
+                            # Deactivate Kaiju
+                            self.kaiju_active = False
+                            self.kaiju_frame = 0
+                            self.kaiju_laser_ticks = 0
+
+                # Orbital State update
+                if self.orbital_active:
+                    self.orbital_frame += 1
+                    
+                    if self.orbital_frame == 6:
                         target_proc = None
                         for p in self.cached_procs:
-                            if p["pid"] == self.kaiju_target_pid:
+                            if p["pid"] == self.orbital_target_pid:
                                 target_proc = p
                                 break
                         if not target_proc:
-                            target_proc = {"pid": self.kaiju_target_pid, "name": "Process"}
-
-                        stop_x = max(1, target_x - 8)
-                        kx = min(stop_x, self.kaiju_frame * 6)
+                            target_proc = {"pid": self.orbital_target_pid, "name": "Process"}
+                            
+                        # Instantiate 3D demolition tracking on the target cell
+                        self.renderer.start_demolition(
+                            target_proc, 
+                            (self.orbital_target_x, self.orbital_target_y, 
+                             self.orbital_target_height, self.orbital_target_width, self.orbital_target_depth)
+                        )
+                        # Non-blocking kill hand-off execution
+                        self.monitor.terminate_process(self.orbital_target_pid)
                         
-                        if kx == stop_x:
-                            self.kaiju_laser_ticks += 1
-                            if self.kaiju_laser_ticks == 5:
-                                # Trigger collapse and termination
-                                self.renderer.start_demolition(target_proc, (target_x, target_y, target_height, target_width, target_depth))
-                                self.monitor.terminate_process(self.kaiju_target_pid)
-                            elif self.kaiju_laser_ticks > 5 + 6: # stand for collapse duration (6 frames)
-                                # Deactivate Kaiju
-                                self.kaiju_active = False
-                                self.kaiju_frame = 0
-                                self.kaiju_laser_ticks = 0
+                    elif self.orbital_frame > 9:
+                        self.orbital_active = False
+                        self.orbital_frame = 0
 
-                    # 3. Handle Demolitions and Selection boundaries
-                    cols_count = self.renderer.cols
-                    self.renderer.selected_col = min(self.renderer.selected_col, cols_count - 1)
-                    
-                    active_procs = self._get_active_processes()
-                    idx = self.renderer.selected_row * cols_count + self.renderer.selected_col
-                    selected_proc = active_procs[idx] if idx < len(active_procs) else None
+                # 3. Handle Demolitions and Selection boundaries
+                cols_count = self.renderer.cols
+                self.renderer.selected_col = min(self.renderer.selected_col, cols_count - 1)
+                
+                active_procs = self._get_active_processes()
+                idx = self.renderer.selected_row * cols_count + self.renderer.selected_col
+                selected_proc = active_procs[idx] if idx < len(active_procs) else None
 
-                    # If selection index has changed, update details immediately
-                    if selected_proc and selected_proc["pid"] != self.last_selected_pid:
-                        self._update_selected_proc_details(selected_proc)
-                    elif not selected_proc:
-                        self._update_selected_proc_details(None)
+                # If selection index has changed, update details immediately
+                if selected_proc and selected_proc["pid"] != self.last_selected_pid:
+                    self._update_selected_proc_details(selected_proc)
+                elif not selected_proc:
+                    self._update_selected_proc_details(None)
 
-                    # 4. Generate & Draw Canvas Frames
-                    term_w, term_h = self.console.size
-                    city_w = int(term_w * 0.7) - 2 # account for layout splits and border margin
-                    city_h = term_h - 5  # subtract 5: 2 Panel borders + 2 Live overhead + 1 ticker strip
-                    
-                    city_renderable = self.renderer.render_city(
-                        width=city_w,
-                        height=city_h,
-                        processes=self.grid_slots,
-                        system_stats=self.cached_stats,
-                        sort_by=self.sort_by,
-                        search_query=self.search_query,
-                        patrol_mode=self.patrol_mode,
-                        heli_coords=(self.heli_x, self.heli_y),
-                        kaiju_active=self.kaiju_active,
-                        kaiju_frame=self.kaiju_frame,
-                        kaiju_target_pid=self.kaiju_target_pid,
-                        kaiju_target_x=self.kaiju_target_x,
-                        kaiju_target_y=self.kaiju_target_y
-                    )
-                    
-                    # Check if dynamic grid size changed and update monitor limit
-                    expected_limit = self.renderer.rows * self.renderer.cols
-                    if self.monitor.limit != expected_limit:
-                        self.monitor.trigger_immediate_update(self.sort_by, self.search_query, limit=expected_limit)
-                    
-                    # Build sidebar stats dashboard using cached selection details
-                    dash_renderable = self.renderer.draw_dashboard(
-                        system_stats=self.cached_stats,
-                        selected_proc=self.selected_proc_details,
-                        sort_by=self.sort_by,
-                        search_query=self.search_query,
-                        is_paused=self.is_paused
-                    )
-                    
-                    # Update layout panels
-                    layout["city"].update(Panel(city_renderable, border_style=self.renderer.theme["building_border"], title="ZAIBATSU DISTRICT"))
-                    layout["dashboard"].update(dash_renderable)
-                    
-                    # Update the scrolling event ticker bar
-                    ticker_renderable = self.renderer.build_ticker_bar(term_w)
-                    layout["ticker"].update(ticker_renderable)
-                    
-                    # We run at 10 FPS (100ms ticks) for smooth scrolling animations
-                    time.sleep(0.1)
+                # 4. Generate & Draw Canvas Frames
+                term_w, term_h = self.console.size
+                city_w = int(term_w * 0.7) - 2 # account for layout splits and border margin
+                city_h = term_h - 5  # subtract 5: 2 Panel borders + 2 Layout splits + 1 ticker strip
+                
+                city_renderable = self.renderer.render_city(
+                    width=city_w,
+                    height=city_h,
+                    processes=self.grid_slots,
+                    system_stats=self.cached_stats,
+                    sort_by=self.sort_by,
+                    search_query=self.search_query,
+                    patrol_mode=self.patrol_mode,
+                    heli_coords=(self.heli_x, self.heli_y),
+                    kaiju_active=self.kaiju_active,
+                    kaiju_frame=self.kaiju_frame,
+                    kaiju_target_pid=self.kaiju_target_pid,
+                    kaiju_target_x=self.kaiju_target_x,
+                    kaiju_target_y=self.kaiju_target_y,
+                    orbital_active=self.orbital_active,
+                    orbital_frame=self.orbital_frame,
+                    orbital_target_x=self.orbital_target_x,
+                    orbital_target_y=self.orbital_target_y,
+                    orbital_target_width=self.orbital_target_width
+                )
+                
+                # Check if dynamic grid size changed and update monitor limit
+                expected_limit = self.renderer.rows * self.renderer.cols
+                if self.monitor.limit != expected_limit:
+                    self.monitor.trigger_immediate_update(self.sort_by, self.search_query, limit=expected_limit)
+                
+                # Build sidebar stats dashboard using cached selection details
+                dash_renderable = self.renderer.draw_dashboard(
+                    system_stats=self.cached_stats,
+                    selected_proc=self.selected_proc_details,
+                    sort_by=self.sort_by,
+                    search_query=self.search_query,
+                    is_paused=self.is_paused,
+                    is_demo=self.demo
+                )
+                
+                # Update layout panels
+                layout["city"].update(Panel(city_renderable, border_style=self.renderer.theme["building_border"], title="ZAIBATSU DISTRICT"))
+                layout["dashboard"].update(dash_renderable)
+                
+                # Update the scrolling event ticker bar
+                ticker_renderable = self.renderer.build_ticker_bar(term_w)
+                layout["ticker"].update(ticker_renderable)
+                
+                # Draw layout using RLE Diff Engine
+                self.diff_engine.draw(layout)
+
+                # We run at 10 FPS (100ms ticks) for smooth scrolling animations
+                time.sleep(0.1)
 
         except KeyboardInterrupt:
             pass
         finally:
             self.monitor.stop()
             self.keyboard.stop()
-            self.console.clear()
+            self.diff_engine.shutdown()
             self.console.print("[bold bright_magenta]Zaibatsu system shutdown completed gracefully. Goodbye.[/bold bright_magenta]")
 
     def _get_active_processes(self) -> List[Optional[Dict[str, Any]]]:
@@ -330,8 +380,8 @@ class ZaibatsuApp:
             if not key:
                 break
             
-            # If Kaiju mode is active, lock standard controls except emergency exit
-            if self.kaiju_active:
+            # If Kaiju or Orbital mode is active, lock standard controls except emergency exit
+            if self.kaiju_active or self.orbital_active:
                 if key in ('q', 'escape'):
                     self.running = False
                 continue
@@ -421,6 +471,9 @@ class ZaibatsuApp:
             elif key in ('k', 'delete'):
                 if not self.kaiju_active:
                     self._trigger_kaiju_demolition()
+            elif key == 'o':
+                if not self.orbital_active and not self.kaiju_active:
+                    self._trigger_orbital_strike()
 
     def _update_helicopter_selection(self):
         """Update selected building row/col based on current helicopter coordinates."""
@@ -490,6 +543,45 @@ class ZaibatsuApp:
         self.kaiju_frame = 0
         self.kaiju_laser_ticks = 0
 
+    def _trigger_orbital_strike(self):
+        """Locates targeting assets and initiates the satellite kinetic sequence."""
+        import os
+        active_procs = self._get_active_processes()
+        cols_count = self.renderer.cols
+        idx = self.renderer.selected_row * cols_count + self.renderer.selected_col
+        if idx >= len(active_procs):
+            return
+            
+        target_proc = active_procs[idx]
+        if not target_proc:
+            return
+            
+        # Hard Security Boundary Check: Prevent self-destruction terminal corruption
+        if target_proc["pid"] == os.getpid():
+            self.renderer.add_event("WIRE: ERROR - MAINFRAME SELF-TARGET BLOCK")
+            return
+
+        self.orbital_target_pid = target_proc["pid"]
+        self.orbital_target_x = -1
+        
+        # Extract structural layout geometry from positions cache
+        if hasattr(self.renderer, "last_building_positions"):
+            for r, c, col_start, ground_y, b_height, b_width, b_depth, proc in self.renderer.last_building_positions:
+                if proc["pid"] == self.orbital_target_pid:
+                    self.orbital_target_x = col_start
+                    self.orbital_target_y = ground_y
+                    self.orbital_target_height = b_height
+                    self.orbital_target_width = b_width
+                    self.orbital_target_depth = b_depth
+                    break
+
+        if self.orbital_target_x == -1:
+            return # Abort if target coordinates drop out of cache bounds
+            
+        self.orbital_active = True
+        self.orbital_frame = 0
+        self.renderer.add_event(f"BAT: SATELLITE KINETIC LOCK ON PID {self.orbital_target_pid}")
+
     def _detect_process_events(self):
         """Detect process spawns, deaths, and CPU spikes to feed the event ticker."""
         current_pids = {p["pid"]: p for p in self.cached_procs}
@@ -535,9 +627,14 @@ def main():
         default=DEFAULT_UPDATE_INTERVAL,
         help="Update interval for metrics in seconds (default: 0.5)"
     )
+    parser.add_argument(
+        "-d", "--demo",
+        action="store_true",
+        help="Run in Demo Mode with mock processes and safe terminations"
+    )
     args = parser.parse_args()
 
-    app = ZaibatsuApp(theme=args.theme, interval=args.interval)
+    app = ZaibatsuApp(theme=args.theme, interval=args.interval, demo=args.demo)
     app.run()
 
 if __name__ == "__main__":
