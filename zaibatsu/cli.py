@@ -247,7 +247,7 @@ class ZaibatsuApp:
                     self.orbital_frame += dt / 0.1
                     curr_orbital_frame = int(self.orbital_frame)
                     
-                    if curr_orbital_frame == 6 and prev_orbital_frame < 6:
+                    if prev_orbital_frame < 6 <= curr_orbital_frame:
                         target_proc = None
                         for p in self.cached_procs:
                             if p["pid"] == self.orbital_target_pid:
