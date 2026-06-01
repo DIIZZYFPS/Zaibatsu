@@ -183,7 +183,7 @@ class SystemMonitor:
             while pid in existing_pids:
                 pid = random.randint(1000, 9999)
             
-            rss = random.randint(20 * 1024 * 1024, 1.5 * 1024 * 1024 * 1024)
+            rss = random.randint(20 * 1024 * 1024, int(1.5 * 1024 * 1024 * 1024))
             p = {
                 "pid": pid,
                 "name": name,
