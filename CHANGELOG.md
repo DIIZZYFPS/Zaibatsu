@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0-beta](https://github.com/DIIZZYFPS/Zaibatsu/compare/v0.1.2-beta...v0.2.0-beta) (2026-06-03)
+
+
+### Features
+
+* added Demo mode, bug fixes ([fd42096](https://github.com/DIIZZYFPS/Zaibatsu/commit/fd42096e07d64de25d401a9e9351caa900f1edce))
+
 ## [0.1.2-beta](https://github.com/DIIZZYFPS/Zaibatsu/compare/v0.1.1-beta...v0.1.2-beta) (2026-06-01)
 
 
