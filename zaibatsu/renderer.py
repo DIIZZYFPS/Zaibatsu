@@ -698,7 +698,7 @@ class CityRenderer:
 
     def _render_lane_traffic(self, canvas: List[List[Tuple[str, str]]], width: int, Y: int, lane_idx: int, system_stats: Dict[str, Any], dt: float = 0.1):
         """Draws the horizontal road line and car traffic for a specific lane."""
-        if Y >= len(canvas):
+        if Y >= len(canvas) or Y < 0:
             return
             
         for c in range(width):

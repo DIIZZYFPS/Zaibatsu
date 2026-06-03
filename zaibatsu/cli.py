@@ -271,7 +271,9 @@ class ZaibatsuApp:
 
                 # 3. Handle Demolitions and Selection boundaries
                 cols_count = self.renderer.cols
+                rows_count = self.renderer.rows
                 self.renderer.selected_col = min(self.renderer.selected_col, cols_count - 1)
+                self.renderer.selected_row = min(self.renderer.selected_row, rows_count - 1)
                 
                 active_procs = self._get_active_processes()
                 idx = self.renderer.selected_row * cols_count + self.renderer.selected_col
