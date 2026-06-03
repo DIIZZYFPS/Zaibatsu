@@ -43,9 +43,43 @@ Zaibatsu is an interactive, retro-cyberpunk terminal-based process monitor that 
 
 ## 🚀 Setup & Launch
 
-Zaibatsu runs on Windows (using Python's native `msvcrt` for keyboard polling) and requires a terminal that supports Unicode box characters and ANSI colors (e.g. Windows Terminal, VS Code, PowerShell, command prompt).
+Zaibatsu runs on Windows, macOS, and Linux, and requires a terminal that supports Unicode box characters and ANSI colors (e.g., Windows Terminal, VS Code, PowerShell, Command Prompt, or standard Unix terminal).
 
-### 1. Setup Virtual Environment
+### Installation
+
+#### Option A: Install via pipx (Recommended)
+`pipx` isolates Zaibatsu and its dependencies, making it available as a global command-line tool:
+```bash
+pipx install zaibatsu
+```
+
+#### Option B: Install via pip
+You can install Zaibatsu directly from PyPI:
+```bash
+pip install zaibatsu
+```
+
+Once installed, launch it from any terminal:
+```bash
+zaibatsu
+```
+
+or to demo
+
+```bash
+zaibatsu -d
+```
+
+You can customize themes (`cyberpunk`, `matrix`, `sunset`) and refresh rates:
+```bash
+zaibatsu --theme matrix --interval 0.2
+```
+
+---
+
+### Run from Source (Development)
+
+#### 1. Setup Virtual Environment
 Initialize a Python virtual environment and install dependencies:
 ```powershell
 py -m venv venv
@@ -53,25 +87,18 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Run Zaibatsu
-Run the launcher:
+#### 2. Run Zaibatsu Launcher
 ```powershell
 python run.py
-```
-
-### 3. Customize Options
-You can configure themes (`cyberpunk`, `matrix`, `sunset`) and refresh rates:
-```powershell
-python run.py --theme matrix --interval 0.2
 ```
 
 ---
 
 ## 🛠️ Project Structure
 
-- [run.py](file:///c:/Users/DIIZZY/Documents/Code/Light%20Projects/Zaibatsu/run.py): CLI launcher script.
-- [zaibatsu/cli.py](file:///c:/Users/DIIZZY/Documents/Code/Light%20Projects/Zaibatsu/zaibatsu/cli.py): Main terminal screen layout controller.
-- [zaibatsu/renderer.py](file:///c:/Users/DIIZZY/Documents/Code/Light%20Projects/Zaibatsu/zaibatsu/renderer.py): Cityscape layout drawing logic and animations.
-- [zaibatsu/monitor.py](file:///c:/Users/DIIZZY/Documents/Code/Light%20Projects/Zaibatsu/zaibatsu/monitor.py): System and process stats gathering using `psutil`.
-- [zaibatsu/input.py](file:///c:/Users/DIIZZY/Documents/Code/Light%20Projects/Zaibatsu/zaibatsu/input.py): Non-blocking keyboard event listening queue.
-- [zaibatsu/config.py](file:///c:/Users/DIIZZY/Documents/Code/Light%20Projects/Zaibatsu/zaibatsu/config.py): Theme declarations and scaling parameters.
+- [run.py](file:///c:/Users/dgods/Documents/stuff/Zaibatsu/run.py): CLI launcher script.
+- [zaibatsu/cli.py](file:///c:/Users/dgods/Documents/stuff/Zaibatsu/zaibatsu/cli.py): Main terminal screen layout controller.
+- [zaibatsu/renderer.py](file:///c:/Users/dgods/Documents/stuff/Zaibatsu/zaibatsu/renderer.py): Cityscape layout drawing logic and animations.
+- [zaibatsu/monitor.py](file:///c:/Users/dgods/Documents/stuff/Zaibatsu/zaibatsu/monitor.py): System and process stats gathering using `psutil`.
+- [zaibatsu/input.py](file:///c:/Users/dgods/Documents/stuff/Zaibatsu/zaibatsu/input.py): Non-blocking keyboard event listening queue.
+- [zaibatsu/config.py](file:///c:/Users/dgods/Documents/stuff/Zaibatsu/zaibatsu/config.py): Theme declarations and scaling parameters.
