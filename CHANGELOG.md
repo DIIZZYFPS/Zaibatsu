@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1-beta](https://github.com/DIIZZYFPS/Zaibatsu/compare/v0.2.0-beta...v0.2.1-beta) (2026-06-03)
+
+
+### Bug Fixes
+
+* Readme typo ([0a89554](https://github.com/DIIZZYFPS/Zaibatsu/commit/0a89554d9c99174791feb11942c877782051d14f))
+
 ## [0.2.0](https://github.com/DIIZZYFPS/Zaibatsu/compare/v0.1.2-beta...v0.2.0) (2026-06-03)
 
 
