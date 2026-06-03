@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.1-beta](https://github.com/DIIZZYFPS/Zaibatsu/compare/v0.2.0-beta...v0.2.1-beta) (2026-06-03)
+## [0.2.1](https://github.com/DIIZZYFPS/Zaibatsu/compare/v0.2.0-beta...v0.2.1) (2026-06-03)
 
 
 ### Bug Fixes
