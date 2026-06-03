@@ -64,7 +64,7 @@ Once installed, launch it from any terminal:
 zaibatsu
 ```
 
-or to demo
+Or to demo
 
 ```bash
 zaibatsu -d
